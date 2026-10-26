@@ -73,6 +73,28 @@ if(view==='overview' && filtered.length){
  +'</div>';
  charts.push(['exec_stockstatus','donut',statusCounts],['exec_turnover','bar',turnover],['exec_coverage','bar',stockCoverage],['exec_topissued','bar',topIssued]);
 }
+
+if(view==='overview'&&filtered.length){
+ const grouped=uniq(filtered.map(r=>r.Category));
+ const sc=[{label:'ปกติ',value:latest.filter(r=>+r.Closing_units>0&&+r.Closing_units>=+r.SafetyStock_units).length},{label:'ต่ำกว่า Safety',value:latest.filter(r=>+r.Closing_units>0&&+r.Closing_units<+r.SafetyStock_units).length},{label:'หมด',value:latest.filter(r=>+r.Closing_units===0).length}];
+ const fc=grouped.map(cat=>{const t=filtered.filter(r=>r.Category===cat),q=sum(t,'Requested_units');return {label:cat,value:q?Math.round(1000*sum(t,'Issue_units')/q)/10:0}});
+ const best=latest.slice().sort((a,b)=>b.ClosingValue_THB-a.ClosingValue_THB).slice(0,7).map(r=>({label:r.SKU,value:r.ClosingValue_THB}));
+ const daily=uniq(filtered.map(r=>r.Date)).sort().map(date=>{const rr=filtered.filter(r=>r.Date===date);return {label:date.slice(5),value:sum(rr,'Receipt_units'),other:sum(rr,'Issue_units')}});
+ const top='<h2 style="font-size:20px;margin:0 0 15px">Executive Summary <small style="font-size:12px;color:#8fa4c2;font-weight:400">ภาพรวมสำหรับผู้บริหาร</small></h2><div class="kpis">'
+ +card('มูลค่าสต็อกล่าสุด',money(s.value),'บาท','#3de0de','◆')
+ +card('ปริมาณคงเหลือ',n(s.stock)+' ชิ้น',n(s.sku)+' SKU','#a18bfa','▦')
+ +card('Fill Rate',pct(s.fill),'อัตราจ่ายได้','#47d9ab','◉')
+ +card('ยอดค้างจ่าย',n(s.unfilled)+' ชิ้น','ขาดจากคำขอ','#fb7987','⚑')+'</div><div class="grid">'
+ +panel('Supply & Demand Trend',canvas('summary_demand'),8,'รายวัน')
+ +panel('Stock Status',canvas('summary_stock'),4,'สถานะสินค้า')
+ +panel('Inbound vs Outbound',canvas('summary_flow'),7,'รับเข้า/จ่ายออก')
+ +panel('Inventory Distribution',canvas('summary_dist'),5,'ตามหมวดหมู่')
+ +panel('Fill Rate by Category (%)',canvas('summary_fill'),6,'Service')
+ +panel('Top 7 Stock Value SKU',canvas('summary_top'),6,'บาท')
+ +panel('Executive Summary — สิ่งที่ต้องติดตาม','<div class="insight">สินค้าต่ำกว่า Safety Stock '+n(s.low)+' SKU | สินค้าหมด '+n(s.zero)+' SKU | ยอดค้างจ่าย '+n(s.unfilled)+' ชิ้น<br>ตรวจสอบ Smart Alerts และรายการมูลค่าสต็อกสูงเพื่อจัดลำดับการแก้ไข<br><small>ไม่มีข้อมูลวันจัดส่งหรือข้อมูลอายุล็อต จึงไม่คำนวณ On-Time Delivery และ Inventory Aging</small></div>',12)+'</div>';
+ body=top+body;
+ charts=[['summary_demand','bars2',d.map(x=>({label:x.date.slice(5),value:x.requested,other:x.issue}))],['summary_stock','donut',sc],['summary_flow','bars2',daily],['summary_dist','donut',c.map(x=>({label:x.name,value:x.value}))],['summary_fill','bar',fc],['summary_top','bar',best]].concat(charts);
+}
 el('content').innerHTML=body;if(view==='data')filterDataTable();requestAnimationFrame(()=>charts.forEach(([id,type,data])=>draw(id,type,data)))}
 function filterDataTable(){let inp=el('search'),q=(inp?.value||'').toLowerCase(),rows=filtered.filter(x=>x.SKU.toLowerCase().includes(q)||x.ProductName.toLowerCase().includes(q)).slice(0,300);el('explorertable').innerHTML=`<div class="tablewrap"><table class="tbl"><thead><tr>${expected.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${expected.map(k=>`<td>${esc(r[k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
 function draw(id,type,data){const cv=el(id);if(!cv)return;let w=cv.clientWidth,h=cv.clientHeight;if(w<2)return;let ratio=Math.min(devicePixelRatio||1,2);cv.width=w*ratio;cv.height=h*ratio;let ctx=cv.getContext('2d');ctx.scale(ratio,ratio);ctx.clearRect(0,0,w,h);let colors=['#3de0de','#a18bfa','#47d9ab','#f8b867','#fb7987','#6fa0fc'];ctx.font='10px Prompt, sans-serif';if(!data.length||data.every(d=>!d.value)){ctx.fillStyle='#93a6bf';ctx.textAlign='center';ctx.fillText('ไม่มีข้อมูลสำหรับแสดงกราฟ',w/2,h/2);return}if(type==='donut'){const total=data.reduce((s,d)=>s+d.value,0),cx=w*.45,cy=h*.49,r=Math.min(w*.27,h*.37),ring=r*.34;let a=-Math.PI/2;data.forEach((d,i)=>{let b=a+d.value/total*Math.PI*2;ctx.beginPath();ctx.arc(cx,cy,r,a,b);ctx.arc(cx,cy,r-ring,b,a,true);ctx.closePath();ctx.fillStyle=colors[i%colors.length];ctx.fill();a=b});ctx.textAlign='center';ctx.fillStyle='#eaf6ff';ctx.font='600 14px Prompt';ctx.fillText('100%',cx,cy+5);data.slice(0,6).forEach((d,i)=>{let x=w*.76,y=25+i*24;ctx.fillStyle=colors[i%colors.length];ctx.fillRect(x,y,7,7);ctx.fillStyle='#aabbd2';ctx.textAlign='left';ctx.font='10px Prompt';ctx.fillText(d.name||d.label,x+12,y+7,Math.max(20,w*.22))});return}
