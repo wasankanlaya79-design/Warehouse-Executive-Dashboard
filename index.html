@@ -43,6 +43,36 @@ if(view==='overview' && filtered.length){
  +panel('ประเด็นที่ผู้บริหารควรพิจารณา','<div class="insight"><b>เงินทุนจมในสต็อก:</b> ตรวจสอบ SKU มูลค่าสูงสุดและทบทวนระดับคงเหลือ<br><b>คุณภาพการให้บริการ:</b> หมวดหมู่ที่ Fill Rate ต่ำควรตรวจสอบสาเหตุการจ่ายไม่ครบ<br><b>ความเสี่ยงขาดสินค้า:</b> ใช้จำนวน SKU ต่ำกว่า Safety Stock จัดลำดับการแก้ไข<br><b>สมดุลการเคลื่อนไหว:</b> เปรียบเทียบยอดรับเข้าและยอดจ่ายออก รวมถึงวันที่ค้างจ่ายสูง<br><small style="color:#9eb0cb">อ้างอิงยอดคงเหลือล่าสุดต่อ SKU และยอดเคลื่อนไหวตามวันที่เลือก ไม่ใช่ข้อมูลรายได้หรือกำไร</small></div>',12,'Decision support')+'</div>';
  charts.push(['exec_topvalue','bar',topValue],['exec_fillcategory','bar',fillByCat],['exec_riskcategory','bar',riskByCat],['exec_unfilled','bar',daily.map(x=>({label:x.label,value:x.value}))],['exec_flow','bars2',daily.map(x=>({label:x.label,value:x.receipt,other:x.issue}))]);
 }
+
+if(view==='overview' && filtered.length){
+ const statusCounts=[
+ {label:'ปกติ',value:latest.filter(r=>+r.Closing_units>=+r.SafetyStock_units && +r.Closing_units>0).length},
+ {label:'ต่ำกว่า Safety',value:latest.filter(r=>+r.Closing_units>0 && +r.Closing_units<+r.SafetyStock_units).length},
+ {label:'สินค้าหมด',value:latest.filter(r=>+r.Closing_units===0).length}
+ ];
+ const turnover=uniq(filtered.map(r=>r.Category)).map(cat=>{
+   const rows=filtered.filter(r=>r.Category===cat);
+   const dates=uniq(rows.map(r=>r.Date));
+   const cost=rows.reduce((v,r)=>v+(+r.Issue_units||0)*(+r.UnitCost_THB||0),0);
+   const avgValue=dates.reduce((v,date)=>v+sum(rows.filter(r=>r.Date===date),'ClosingValue_THB'),0)/Math.max(1,dates.length);
+   return {label:cat,value:avgValue?Math.round(cost/avgValue*100)/100:0};
+ }).sort((a,b)=>b.value-a.value);
+ const skuFlow=aggregate(filtered);
+ const stockCoverage=skuFlow.map(r=>{
+   const observed=uniq(filtered.filter(x=>x.SKU===r.SKU).map(x=>x.Date)).length;
+   const rate=(+r.Issue_units||0)/Math.max(1,observed);
+   return {label:r.SKU,value:rate?Math.round(+r.Closing_units/rate*10)/10:0,rate};
+ }).filter(r=>r.rate>0).sort((a,b)=>a.value-b.value).slice(0,10);
+ const topIssued=skuFlow.slice().sort((a,b)=>b.Issue_units-a.Issue_units).slice(0,10).map(r=>({label:r.SKU,value:+r.Issue_units}));
+ body+='<h2 style="font-size:16px;margin:27px 0 15px;color:#e7f8ff">Warehouse KPI Deep Dive <span style="font-size:11px;color:#8fa4c2;font-weight:400">วิเคราะห์ต่อยอดตามภาพตัวอย่าง โดยใช้ข้อมูลที่มีจริง</span></h2><div class="grid">'
+ +panel('Stock Status — สัดส่วนสถานะ SKU ล่าสุด',canvas('exec_stockstatus'),6,'Inventory health')
+ +panel('Inventory Turnover — อัตราหมุนเวียนตามหมวดหมู่ (รอบ/ช่วงที่เลือก)',canvas('exec_turnover'),6,'Stock velocity')
+ +panel('Stock Coverage — 10 SKU ที่ครอบคลุมความต้องการได้น้อยที่สุด (วัน)',canvas('exec_coverage'),6,'Days of supply')
+ +panel('Top 10 SKU ตามปริมาณจ่ายออก (ชิ้น)',canvas('exec_topissued'),6,'Outbound volume')
+ +panel('ข้อจำกัดข้อมูล','<div class="insight">อัตราหมุนเวียนประมาณจาก <b>มูลค่าจ่ายออกตามต้นทุน / มูลค่าสต็อกปิดรายวันเฉลี่ย</b> ภายในช่วงที่เลือก ไม่ใช่อัตราหมุนเวียนทั้งปี และ Stock Coverage ประเมินจาก <b>คงเหลือล่าสุด / อัตราจ่ายเฉลี่ยต่อวันของ SKU</b> เป็นเพียงค่าประมาณจากประวัติข้อมูลในช่วงที่เลือก<br><br><b>ไม่ได้แสดง</b> Inventory Aging, Picking Time, On-Time Delivery และ Transportation Cost เพราะ CSV ยังไม่มีวันรับเข้าระดับล็อต เวลาหยิบ วันจัดส่ง และต้นทุนขนส่ง</div>',12,'Data integrity')
+ +'</div>';
+ charts.push(['exec_stockstatus','donut',statusCounts],['exec_turnover','bar',turnover],['exec_coverage','bar',stockCoverage],['exec_topissued','bar',topIssued]);
+}
 el('content').innerHTML=body;if(view==='data')filterDataTable();requestAnimationFrame(()=>charts.forEach(([id,type,data])=>draw(id,type,data)))}
 function filterDataTable(){let inp=el('search'),q=(inp?.value||'').toLowerCase(),rows=filtered.filter(x=>x.SKU.toLowerCase().includes(q)||x.ProductName.toLowerCase().includes(q)).slice(0,300);el('explorertable').innerHTML=`<div class="tablewrap"><table class="tbl"><thead><tr>${expected.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${expected.map(k=>`<td>${esc(r[k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
 function draw(id,type,data){const cv=el(id);if(!cv)return;let w=cv.clientWidth,h=cv.clientHeight;if(w<2)return;let ratio=Math.min(devicePixelRatio||1,2);cv.width=w*ratio;cv.height=h*ratio;let ctx=cv.getContext('2d');ctx.scale(ratio,ratio);ctx.clearRect(0,0,w,h);let colors=['#3de0de','#a18bfa','#47d9ab','#f8b867','#fb7987','#6fa0fc'];ctx.font='10px Prompt, sans-serif';if(!data.length||data.every(d=>!d.value)){ctx.fillStyle='#93a6bf';ctx.textAlign='center';ctx.fillText('ไม่มีข้อมูลสำหรับแสดงกราฟ',w/2,h/2);return}if(type==='donut'){const total=data.reduce((s,d)=>s+d.value,0),cx=w*.45,cy=h*.49,r=Math.min(w*.27,h*.37),ring=r*.34;let a=-Math.PI/2;data.forEach((d,i)=>{let b=a+d.value/total*Math.PI*2;ctx.beginPath();ctx.arc(cx,cy,r,a,b);ctx.arc(cx,cy,r-ring,b,a,true);ctx.closePath();ctx.fillStyle=colors[i%colors.length];ctx.fill();a=b});ctx.textAlign='center';ctx.fillStyle='#eaf6ff';ctx.font='600 14px Prompt';ctx.fillText('100%',cx,cy+5);data.slice(0,6).forEach((d,i)=>{let x=w*.76,y=25+i*24;ctx.fillStyle=colors[i%colors.length];ctx.fillRect(x,y,7,7);ctx.fillStyle='#aabbd2';ctx.textAlign='left';ctx.font='10px Prompt';ctx.fillText(d.name||d.label,x+12,y+7,Math.max(20,w*.22))});return}
